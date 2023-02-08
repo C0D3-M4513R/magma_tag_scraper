@@ -3,7 +3,8 @@ name: Build
 on:
   push:
     branches: [staging,trying,dev,main]
-    # Remove the line above to run when pushing to master
+    tags:
+      - "v*"
   pull_request:
     branches: [ main, dev]
   workflow_dispatch:
@@ -18,13 +19,30 @@ jobs:
     steps:
       - name: Done
         run: exit 0
+  tag_push:
+    name: "Tag Push"
+    if: github.event_name == 'push' && contains(github.ref, 'refs/tags/')
+    needs: ["ci"]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v3
+        name: Download Artifacts
+        with:
+          path: ~/Artifacts
+      - name: Publish
+        uses: marvinpinto/action-automatic-releases@v1.2.1
+        with:
+          repo_token: "${{ secrets.GITHUB_TOKEN }}"
+          prerelease: false
+          files: ~/Artifacts/*
   build:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         profile: ["release"] #"dev"
-        target: [i686-unknown-linux-gnu, i686-pc-windows-gnu, x86_64-apple-darwin, x86_64-pc-windows-gnu, x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu]
+        #todo: re-add x86_64-apple-darwin. https://github.com/rust-cross/cargo-zigbuild/issues/84
+        target: [i686-unknown-linux-gnu, i686-pc-windows-gnu, x86_64-pc-windows-gnu, x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu]
 
     steps:
       - uses: Swatinem/rust-cache@v2
@@ -46,19 +64,22 @@ jobs:
         with:
           command: zigbuild
           args: --target ${{ matrix.target }} --profile ${{ matrix.profile }} --package magma-scraper
+      - name: Move Binary
+        continue-on-error: true
+        run: |
+          mv target/${{ matrix.target }}/{release,debug}/magma-scraper{,.exe} .
+      - name: Rename Binary.exe
+        continue-on-error: true
+        run: |
+          mv magma-scraper.exe ${{ matrix.target }}-magma-scraper.exe
+      - name: Rename Binary
+        continue-on-error: true
+        run: |
+          mv magma-scraper ${{ matrix.target }}-magma-scraper
       - uses: actions/upload-artifact@v3
-        name: upload release artifact
-        if: ${{ matrix.profile == 'release' }}
+        name: Upload Artifact
         with:
-          name: magma_scraper-${{ matrix.target}}-release
+          name: magma_scraper-${{ matrix.target}}-${{ matrix.profile }}-${{ matrix.feature }}
           path: |
-            target/release/magma_scraper*
-            target/${{ matrix.target }}/release/magma-scraper*
-      - uses: actions/upload-artifact@v3
-        name: upload dev artifact
-        if: ${{ matrix.profile == 'dev' }}
-        with:
-          name: magma_scraper-${{ matrix.target}}-dev-${{ matrix.feature }}
-          path: |
-            target/debug/magma_scraper*
-            target/${{ matrix.target }}/debug/magma-scraper*
+            ${{ matrix.target }}-magma-scraper
+            ${{ matrix.target }}-magma-scraper.exe
