@@ -23,7 +23,7 @@ jobs:
     strategy:
       matrix:
         profile: ["release"] #"dev"
-        target: [aarch64-unknown-linux-gnu, i686-unknown-linux-gnu, i686-pc-windows-msvc, x86_64-apple-darwin, x86_64-pc-windows-msvc, x86_64-apple-darwin]
+        target: [aarch64-unknown-linux-gnu, x86_64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu] #i686-unknown-linux-gnu, i686-pc-windows-msvc
     steps:
       - uses: actions/checkout@v3
       - uses: actions-rs/toolchain@v1
