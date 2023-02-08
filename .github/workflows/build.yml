@@ -1,0 +1,51 @@
+name: Build
+
+on:
+  push:
+    branches: [staging,trying,dev,main]
+    # Remove the line above to run when pushing to master
+  pull_request:
+    branches: [ main, dev]
+  workflow_dispatch:
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  ci:
+    name: "build-ci"
+    needs: ["build"]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Done
+        run: exit 0
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        profile: ["release"] #"dev"
+        target: [aarch64-unknown-linux-gnu, i686-unknown-linux-gnu, i686-pc-windows-msvc, x86_64-apple-darwin, x86_64-pc-windows-msvc, x86_64-apple-darwin]
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          target: ${{ matrix.target }}
+          profile: minimal
+      - uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --target ${{ matrix.target }} --profile ${{ matrix.profile }} --package magma-scraper
+      - uses: actions/upload-artifact@v3
+        name: upload release artifact
+        if: ${{ matrix.profile == 'release' }}
+        with:
+          name: magma_scraper-${{ matrix.target}}-release
+          path: |
+            target/${{ matrix.target }}/release/magma_scraper.*
+      - uses: actions/upload-artifact@v3
+        name: upload dev artifact
+        if: ${{ matrix.profile == 'dev' }}
+        with:
+          name: magma_scraper-${{ matrix.target}}-dev-${{ matrix.feature }}
+          path: |
+            target/${{ matrix.target }}/release/magma_scraper.*
