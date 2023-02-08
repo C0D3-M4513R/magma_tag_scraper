@@ -34,7 +34,13 @@ jobs:
         with:
           repo_token: "${{ secrets.GITHUB_TOKEN }}"
           prerelease: false
-          files: ~/Artifacts/*
+          files:
+          - ~/Artifacts/i686-unknown-linux-gnu-magma-scraper
+          - ~/Artifacts/x86_64-unknown-linux-gnu-magma-scraper
+          - ~/Artifacts/aarch64-unknown-linux-gnu-magma-scraper
+          - ~/Artifacts/aarch64-unknown-linux-gnu-magma-scraper
+          - ~/Artifacts/i686-pc-windows-gnu-magma-scraper.exe
+          - ~/Artifacts/x86_64-unknown-linux-gnu-magma-scraper.exe
   build:
     runs-on: ubuntu-latest
     strategy:
