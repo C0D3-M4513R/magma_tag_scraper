@@ -1,0 +1,85 @@
+name: Build
+
+on:
+  push:
+    branches: [staging,trying,dev,main]
+    tags:
+      - "v*"
+  pull_request:
+    branches: [ main, dev]
+  workflow_dispatch:
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  ci:
+    name: "build-ci"
+    needs: ["build"]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Done
+        run: exit 0
+  tag_push:
+    name: "Tag Push"
+    if: github.event_name == 'push' && contains(github.ref, 'refs/tags/')
+    needs: ["ci"]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v3
+        name: Download Artifacts
+        with:
+          path: ~/Artifacts
+      - name: Publish
+        uses: marvinpinto/action-automatic-releases@v1.2.1
+        with:
+          repo_token: "${{ secrets.GITHUB_TOKEN }}"
+          prerelease: false
+          files: ~/Artifacts/*
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: ["release"] #"dev"
+        #todo: re-add x86_64-apple-darwin. https://github.com/rust-cross/cargo-zigbuild/issues/84
+        target: [i686-unknown-linux-gnu, i686-pc-windows-gnu, x86_64-pc-windows-gnu, x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu]
+
+    steps:
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          target: ${{ matrix.target }}
+          override: true
+          profile: minimal
+      - uses: actions/checkout@v3
+      - name: Install cargo-zigbuild
+        uses: baptiste0928/cargo-install@v1
+        with:
+          crate: cargo-zigbuild
+      - name: install zig
+        run: |
+          pip3 install ziglang
+      - uses: actions-rs/cargo@v1
+        with:
+          command: zigbuild
+          args: --target ${{ matrix.target }} --profile ${{ matrix.profile }} --package magma-scraper
+      - name: Move Binary
+        continue-on-error: true
+        run: |
+          mv target/${{ matrix.target }}/{release,debug}/magma-scraper{,.exe} .
+      - name: Rename Binary.exe
+        continue-on-error: true
+        run: |
+          mv magma-scraper.exe ${{ matrix.target }}-magma-scraper.exe
+      - name: Rename Binary
+        continue-on-error: true
+        run: |
+          mv magma-scraper ${{ matrix.target }}-magma-scraper
+      - uses: actions/upload-artifact@v3
+        name: Upload Artifact
+        with:
+          name: magma_scraper-${{ matrix.target}}-${{ matrix.profile }}-${{ matrix.feature }}
+          path: |
+            ${{ matrix.target }}-magma-scraper
+            ${{ matrix.target }}-magma-scraper.exe
