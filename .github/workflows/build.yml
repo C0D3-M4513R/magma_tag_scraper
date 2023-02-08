@@ -19,18 +19,45 @@ jobs:
       - name: Done
         run: exit 0
   build:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         profile: ["release"] #"dev"
-        target: [aarch64-unknown-linux-gnu, x86_64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu] #i686-unknown-linux-gnu, i686-pc-windows-msvc
+        target: [i686-unknown-linux-gnu, i686-pc-windows-msvc, x86_64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu] #
+        include:
+          - os: ubuntu-latest
+            target: i686-unknown-linux-gnu
+            arch: i386
+          - os: windows-latest
+            target: i686-pc-windows-msvc
+            arch: i386
+          - os: ubuntu-latest
+            target: x86_64-apple-darwin
+            arch: amd64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            arch: amd64
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            arch: amd64
     steps:
-      - uses: actions/checkout@v3
+      - name: Install OpenSSL
+        if: ${{ matrix.os == 'ubuntu-latest' }}
+        run: |
+          sudo dpkg --print-architecture
+          sudo dpkg --print-foreign-architectures
+          sudo dpkg --add-architecture ${{ matrix.arch }}
+          sudo dpkg --print-architecture
+          sudo dpkg --print-foreign-architectures
+          sudo apt-get update
+          sudo apt-get install -y libssl-dev:${{ matrix.arch }}
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
           target: ${{ matrix.target }}
           profile: minimal
+      - uses: actions/checkout@v3
       - uses: actions-rs/cargo@v1
         with:
           command: build
@@ -41,6 +68,7 @@ jobs:
         with:
           name: magma_scraper-${{ matrix.target}}-release
           path: |
+            target/release/magma_scraper.*
             target/${{ matrix.target }}/release/magma_scraper.*
       - uses: actions/upload-artifact@v3
         name: upload dev artifact
@@ -48,4 +76,5 @@ jobs:
         with:
           name: magma_scraper-${{ matrix.target}}-dev-${{ matrix.feature }}
           path: |
+            target/release/magma_scraper.*
             target/${{ matrix.target }}/release/magma_scraper.*
