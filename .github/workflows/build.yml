@@ -25,39 +25,15 @@ jobs:
       matrix:
         profile: ["release"] #"dev"
         target: [i686-unknown-linux-gnu, i686-pc-windows-gnu, x86_64-apple-darwin, x86_64-pc-windows-gnu, x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu]
-        include:
-          - target: i686-unknown-linux-gnu
-#            install: gcc-multilib g++-multilib
-#            os: ubuntu-latest
-          - target: i686-pc-windows-gnu
-#            install: gcc-mingw-w64-i686
-#            os: ubuntu-latest
-          - target: x86_64-apple-darwin
-#            install:
-#            os: ubuntu-latest
-          - target: x86_64-pc-windows-gnu
-#            install: gcc-mingw-w64-x86-64
-#            os: ubuntu-latest
-          - target: x86_64-unknown-linux-gnu
-#            install: gcc-multilib g++-multilib
-#            os: ubuntu-latest
-          - target: aarch64-unknown-linux-gnu
-#            install: gcc-aarch64-linux-gnu
-#            os: ubuntu-latest
 
     steps:
       - uses: Swatinem/rust-cache@v2
-#      - name: Install cross compilers
-#        if: ${{ matrix.os == 'ubuntu-latest' }}
-#        run: |
-#          sudo apt-get update
-#          sudo apt-get install -y ${{ matrix.install }}
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
           target: ${{ matrix.target }}
           override: true
-#          profile: minimal
+          profile: minimal
       - uses: actions/checkout@v3
       - name: Install cargo-zigbuild
         uses: baptiste0928/cargo-install@v1
