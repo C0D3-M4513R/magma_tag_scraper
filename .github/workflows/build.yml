@@ -53,7 +53,7 @@ jobs:
           name: magma_scraper-${{ matrix.target}}-release
           path: |
             target/release/magma_scraper*
-            target/${{ matrix.target }}/release/magma_scraper*
+            target/${{ matrix.target }}/release/magma-scraper*
       - uses: actions/upload-artifact@v3
         name: upload dev artifact
         if: ${{ matrix.profile == 'dev' }}
@@ -61,4 +61,4 @@ jobs:
           name: magma_scraper-${{ matrix.target}}-dev-${{ matrix.feature }}
           path: |
             target/debug/magma_scraper*
-            target/${{ matrix.target }}/debug/magma_scraper*
+            target/${{ matrix.target }}/debug/magma-scraper*
