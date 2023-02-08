@@ -45,6 +45,7 @@ async fn run() -> Result<(), ()> {
         .with_module_level("reqwest::connect", log::LevelFilter::Info)
         .with_module_level("reqwest::blocking::wait", log::LevelFilter::Info)
         .with_module_level("mio::poll", log::LevelFilter::Info)
+        .with_module_level("rustls", log::LevelFilter::Info)
         .init()
         .expect(
             "Failed to initialize logger. Setting the logger for the first time should not fail.",
