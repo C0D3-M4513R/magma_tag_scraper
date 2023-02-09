@@ -158,7 +158,7 @@ async fn get_lib_list(version: Version) -> (Version, Result<(), Error>) {
                 let installer_link = i.get_installer_link();
                 download_link(&folder_server, &folder_server_path, link, &mut js);
                 if link != installer_link {
-                    download_link(&folder_installer, &folder_installer_path, i.get_installer_link(), &mut js);
+                    download_link(&folder_installer, &folder_installer_path, installer_link, &mut js);
                 }
             }
         }
