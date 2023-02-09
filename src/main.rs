@@ -7,7 +7,7 @@ mod download;
 mod versions;
 
 const MAGMA_API_URL: &str = "https://api.magmafoundation.org/api/v2/";
-const MAX_VERSIONS: usize = 5;
+const MAX_VERSIONS: usize = 0;
 
 fn get_cwd() -> PathBuf {
     std::env::current_dir().expect("Failed to get current working directory")
