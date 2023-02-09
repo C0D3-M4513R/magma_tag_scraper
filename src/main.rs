@@ -1,7 +1,8 @@
 #![deny(clippy::unwrap_used)]
 use std::fs::DirEntry;
 use std::io::ErrorKind;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use log::LevelFilter;
 use tokio::task::JoinSet;
 mod download;
 mod versions;
@@ -41,11 +42,12 @@ fn main() -> Result<(), ()> {
 async fn run() -> Result<(), ()> {
     simple_logger::SimpleLogger::new()
         .with_utc_timestamps()
-        .with_module_level("want", log::LevelFilter::Info)
-        .with_module_level("reqwest::connect", log::LevelFilter::Info)
-        .with_module_level("reqwest::blocking::wait", log::LevelFilter::Info)
-        .with_module_level("mio::poll", log::LevelFilter::Info)
-        .with_module_level("rustls", log::LevelFilter::Info)
+        .with_module_level("want", LevelFilter::Info)
+        .with_module_level("reqwest::connect", LevelFilter::Info)
+        .with_module_level("reqwest::blocking::wait", LevelFilter::Info)
+        .with_module_level("mio::poll", LevelFilter::Info)
+        .with_module_level("rustls", LevelFilter::Info)
+        .with_level(LevelFilter::Info)
         .init()
         .expect(
             "Failed to initialize logger. Setting the logger for the first time should not fail.",
@@ -94,21 +96,16 @@ async fn get_lib_list(version: Version) -> (Version, Result<(), Error>) {
     let mut folder_path = get_cwd().clone();
     folder_path.push(version_name);
     let folder_path = folder_path;
-    if let Err(e) = std::fs::create_dir_all(folder_path.as_path()) {
-        return (version, Err(Box::new(e)));
-    }
-    let folder_r = std::fs::read_dir(folder_path.as_path());
-    let folder: Vec<DirEntry>;
-    match folder_r {
-        Err(e) => return (version, Err(Box::new(e))),
-        Ok(e) => {
-            folder = e
-                .map(|e| e.ok())
-                .filter(Option::is_some)
-                .map(|e| unsafe { e.unwrap_unchecked() })
-                .collect()
-        }
-    }
+    let folder_server_path = folder_path.join("server");
+    let folder_installer_path = folder_path.join("installer");
+    let folder_server: Vec<DirEntry> = match get_folder_content(&folder_server_path){
+        Ok(e) => e,
+        Err(e) => return (version, Err(e))
+    };
+    let folder_installer: Vec<DirEntry> = match get_folder_content(&folder_installer_path){
+        Ok(e) => e,
+        Err(e) => return (version, Err(e))
+    };
 
     let mut js: JoinSet<Result<(), Error>> = JoinSet::new();
     match versions {
@@ -126,14 +123,26 @@ async fn get_lib_list(version: Version) -> (Version, Result<(), Error>) {
                     versions_new = versions;
                 }
             }
-            for i in &folder {
+            //delete old versions in server folder
+            for i in &folder_server {
                 if let Some(file_name) = i.file_name().to_str() {
                     if versions_old
                         .iter()
-                        .filter(|e| {
-                            get_name(e.get_link()) == file_name
-                                || get_name(e.get_installer_link()) == file_name
-                        })
+                        .filter(|e| get_name(e.get_link()) == file_name)
+                        .count()
+                        > 0
+                    {
+                        log::trace!("Deleting {}", file_name);
+                        js.spawn(remove_version(i.path()));
+                    }
+                }
+            }
+            //delete old versions in installer folder
+            for i in &folder_installer {
+                if let Some(file_name) = i.file_name().to_str() {
+                    if versions_old
+                        .iter()
+                        .filter(|e| get_name(e.get_installer_link()) == file_name)
                         .count()
                         > 0
                     {
@@ -144,11 +153,13 @@ async fn get_lib_list(version: Version) -> (Version, Result<(), Error>) {
             }
             log::info!("Versions: {}", versions_new.len());
             for i in versions_new {
-                // log::info!("Handling Version: {:#?}",i);
-                // std::thread::sleep(std::time::Duration::from_millis(111));
-                download_link(&folder, &folder_path, i.get_link(), &mut js);
-                // std::thread::sleep(std::time::Duration::from_millis(111));
-                download_link(&folder, &folder_path, i.get_installer_link(), &mut js);
+                log::trace!("Handling Version: {:#?}",i);
+                let link = i.get_link();
+                let installer_link = i.get_installer_link();
+                download_link(&folder_server, &folder_server_path, link, &mut js);
+                if link != installer_link {
+                    download_link(&folder_installer, &folder_installer_path, i.get_installer_link(), &mut js);
+                }
             }
         }
     }
@@ -164,12 +175,12 @@ async fn get_lib_list(version: Version) -> (Version, Result<(), Error>) {
 }
 fn download_link(
     folder: &Vec<DirEntry>,
-    folder_path: &PathBuf,
+    folder_path: impl AsRef<Path>,
     link: &String,
     js: &mut JoinSet<Result<(), Error>>,
 ) {
-    let file_name = get_name(link);
-    let path = std::path::Path::new(folder_path).join(&file_name);
+    let file_name = get_name(link).to_string();
+    let path = folder_path.as_ref().join(&file_name);
     if folder_contains_file_name(folder, &file_name).is_none() {
         log::info!("Downloading {} to {}", link, path.display());
         js.spawn(download::fetch_url(link.clone(), path));
@@ -209,5 +220,19 @@ fn get_name(url: &String) -> &str {
     match name {
         None => url.as_str(),
         Some((_, end)) => end,
+    }
+}
+fn get_folder_content(path:impl AsRef<Path>) -> Result<Vec<DirEntry>, Error>{
+    if let Err(e) = std::fs::create_dir_all(&path) {
+        return Err(Box::new(e)
+        );
+    }
+    match std::fs::read_dir(&path) {
+        Err(e) => Err(Box::new(e)),
+        Ok(e) => Ok(e
+                .map(|e| e.ok())
+                .filter(Option::is_some)
+                .map(|e| unsafe { e.unwrap_unchecked() })
+                .collect())
     }
 }
