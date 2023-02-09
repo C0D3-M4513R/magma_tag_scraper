@@ -7,7 +7,7 @@ mod download;
 mod versions;
 
 const MAGMA_API_URL: &str = "https://api.magmafoundation.org/api/v2/";
-const MAX_VERSIONS: usize = 5;
+const MAX_VERSIONS: usize = 0;
 
 fn get_cwd() -> PathBuf {
     std::env::current_dir().expect("Failed to get current working directory")
@@ -118,7 +118,7 @@ async fn get_lib_list(version: Version) -> (Version, Result<(), Error>) {
             let versions_old: Vec<versions::Version>;
             {
                 versions.shrink_to_fit();
-                if versions.len() <= MAX_VERSIONS {
+                if versions.len() <= MAX_VERSIONS || MAX_VERSIONS == 0{
                     versions_new = versions;
                     versions_old = Vec::new();
                 } else {
