@@ -26,7 +26,7 @@ impl Version {
             Version::V1_12_2 => "1.12.2",
             Version::V1_16_5 => "1.16.5",
             Version::V1_18_2 => "1.18.2",
-            Version::V1_19_3 => "1.19.3",
+            Version::V1_19_3 => "1.19.3"
         }
     }
 }
