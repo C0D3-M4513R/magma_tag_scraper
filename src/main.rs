@@ -19,6 +19,7 @@ enum Version {
     V1_16_5,
     V1_18_2,
     V1_19_3,
+    V1_20_1,
 }
 impl Version {
     fn to_string(&self) -> &'static str {
@@ -27,6 +28,7 @@ impl Version {
             Version::V1_16_5 => "1.16.5",
             Version::V1_18_2 => "1.18.2",
             Version::V1_19_3 => "1.19.3",
+            Version::V1_20_1 => "1.20.1",
         }
     }
 }
@@ -56,6 +58,7 @@ async fn run() -> Result<(), ()> {
     js.spawn(get_lib_list(Version::V1_12_2));
     js.spawn(get_lib_list(Version::V1_18_2));
     js.spawn(get_lib_list(Version::V1_19_3));
+    js.spawn(get_lib_list(Version::V1_20_1));
 
     while let Some(future) = js.join_next().await {
         if let Ok((version, res)) = future {
