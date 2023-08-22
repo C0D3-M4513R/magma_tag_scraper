@@ -36,7 +36,7 @@ pub async fn fetch_url(url: String, file_name: impl AsRef<Path>) -> Result<JoinH
         file_name.as_ref().display()
     );
     let path = file_name.as_ref().to_path_buf();
-    Ok(std::thread::spawn(move|| {
+    Ok(std::thread::spawn(move || {
         let mut file = std::fs::File::create(path)?;
         file.write_all(&bytes)?;
         Ok(())

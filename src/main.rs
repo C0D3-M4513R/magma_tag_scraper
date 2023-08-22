@@ -1,12 +1,12 @@
 #![deny(clippy::unwrap_used)]
+use log::LevelFilter;
 use std::fs::DirEntry;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
-use log::LevelFilter;
 use std::sync::mpsc::TryRecvError;
-use tokio::task::JoinSet;
+use std::sync::OnceLock;
 use std::thread::JoinHandle;
+use tokio::task::JoinSet;
 use tokio::time::Instant;
 
 mod download;
@@ -39,9 +39,9 @@ impl Version {
     }
 }
 pub(crate) type Error = Box<dyn std::error::Error + Send + Sync>;
-fn get_runtime()-> &'static tokio::runtime::Runtime {
+fn get_runtime() -> &'static tokio::runtime::Runtime {
     static RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
-    RUNTIME.get_or_init(||{
+    RUNTIME.get_or_init(|| {
         tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
@@ -73,29 +73,24 @@ async fn run() -> Result<(), ()> {
     js.spawn(get_lib_list(Version::V1_18_2));
     js.spawn(get_lib_list(Version::V1_19_3));
     js.spawn(get_lib_list(Version::V1_20_1));
-    let (send_io, rec_io) = std::sync::mpsc::channel::<JoinHandle<Result<(),Error>>>();
-    let writer = std::thread::spawn(move||{
-        loop{
-            match rec_io.try_recv(){
-                Err(TryRecvError::Disconnected) =>{
-                    return;
-                }
-                Err(TryRecvError::Empty) => {
-                    std::thread::sleep(std::time::Duration::from_millis(10));
-                }
-                Ok(e) => {
-                    match e.join() {
-                        Ok(Ok(_)) => log::info!("Finished writing"),
-                        Ok(Err(e)) => log::error!("Failed to write: {}", e),
-                        Err(e) => log::error!("Failed to join writer thread: {:#?}", e),
-                    }
-                }
-
+    let (send_io, rec_io) = std::sync::mpsc::channel::<JoinHandle<Result<(), Error>>>();
+    let writer = std::thread::spawn(move || loop {
+        match rec_io.try_recv() {
+            Err(TryRecvError::Disconnected) => {
+                return;
             }
+            Err(TryRecvError::Empty) => {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            Ok(e) => match e.join() {
+                Ok(Ok(_)) => log::info!("Finished writing"),
+                Ok(Err(e)) => log::error!("Failed to write: {}", e),
+                Err(e) => log::error!("Failed to join writer thread: {:#?}", e),
+            },
         }
     });
     while let Some(future) = js.join_next().await {
-        if let Ok((version, mut download_thread,  res)) = future {
+        if let Ok((version, mut download_thread, res)) = future {
             while let Some(thread) = download_thread.join_next().await {
                 match thread {
                     Ok(Ok(e)) => {
@@ -117,7 +112,7 @@ async fn run() -> Result<(), ()> {
         }
     }
     drop(send_io);
-    match writer.join(){
+    match writer.join() {
         Ok(_) => {}
         Err(e) => log::error!("Failed to join writer thread: {:#?}", e),
     };
@@ -125,8 +120,14 @@ async fn run() -> Result<(), ()> {
     return Ok(());
 }
 
-async fn get_lib_list(version: Version) -> (Version,JoinSet<Result<JoinHandle<Result<(),Error>>,Error>>,Result<(), Error>) {
-    let mut download: JoinSet<Result<JoinHandle<Result<(),Error>>, Error>> = JoinSet::new();
+async fn get_lib_list(
+    version: Version,
+) -> (
+    Version,
+    JoinSet<Result<JoinHandle<Result<(), Error>>, Error>>,
+    Result<(), Error>,
+) {
+    let mut download: JoinSet<Result<JoinHandle<Result<(), Error>>, Error>> = JoinSet::new();
     let resp;
     let req = reqwest::get(MAGMA_API_URL.to_string() + version.to_string()).await;
     match req {
@@ -156,11 +157,11 @@ async fn get_lib_list(version: Version) -> (Version,JoinSet<Result<JoinHandle<Re
         let folder_installer_path = folder_path.join("installer");
         let folder_server: Vec<DirEntry> = match get_folder_content(&folder_server_path) {
             Ok(e) => e,
-            Err(e) => return (version, download, js, Err(e))
+            Err(e) => return (version, download, js, Err(e)),
         };
         let folder_installer: Vec<DirEntry> = match get_folder_content(&folder_installer_path) {
             Ok(e) => e,
-            Err(e) => return (version, download, js, Err(e))
+            Err(e) => return (version, download, js, Err(e)),
         };
 
         match versions {
@@ -208,19 +209,26 @@ async fn get_lib_list(version: Version) -> (Version,JoinSet<Result<JoinHandle<Re
                     }
                 }
                 for i in versions_new {
-                    log::trace!("Handling Version: {:#?}",i);
+                    log::trace!("Handling Version: {:#?}", i);
                     let link = i.get_link();
                     let installer_link = i.get_installer_link();
                     download_link(&folder_server, &folder_server_path, link, &mut download);
                     if link != installer_link {
-                        download_link(&folder_installer, &folder_installer_path, installer_link, &mut download);
+                        download_link(
+                            &folder_installer,
+                            &folder_installer_path,
+                            installer_link,
+                            &mut download,
+                        );
                     }
                 }
             }
         }
 
         (version, download, js, Ok(()))
-    }).await {
+    })
+    .await
+    {
         Ok((verison, download, mut js, ok)) => {
             let pre_io = Instant::now();
             while let Some(thred) = js.join_next().await {
@@ -229,17 +237,21 @@ async fn get_lib_list(version: Version) -> (Version,JoinSet<Result<JoinHandle<Re
                     Err(e) => log::error!("Failed to join io thread: {}", e),
                 }
             }
-            log::warn!("Old version IO for version {} took {}ms", verison.to_string(), pre_io.elapsed().as_millis());
+            log::warn!(
+                "Old version IO for version {} took {}ms",
+                verison.to_string(),
+                pre_io.elapsed().as_millis()
+            );
             (verison, download, ok)
-        },
-        Err(e) => (version, JoinSet::new(), Err(Box::new(e)))
-    }
+        }
+        Err(e) => (version, JoinSet::new(), Err(Box::new(e))),
+    };
 }
 fn download_link(
     folder: &Vec<DirEntry>,
     folder_path: impl AsRef<Path>,
     link: &String,
-    js: &mut JoinSet<Result<JoinHandle<Result<(),Error>>, Error>>,
+    js: &mut JoinSet<Result<JoinHandle<Result<(), Error>>, Error>>,
 ) {
     let file_name = get_name(link).to_string();
     let path = folder_path.as_ref().join(&file_name);
@@ -284,17 +296,16 @@ fn get_name(url: &String) -> &str {
         Some((_, end)) => end,
     }
 }
-fn get_folder_content(path:impl AsRef<Path>) -> Result<Vec<DirEntry>, Error>{
+fn get_folder_content(path: impl AsRef<Path>) -> Result<Vec<DirEntry>, Error> {
     if let Err(e) = std::fs::create_dir_all(&path) {
-        return Err(Box::new(e)
-        );
+        return Err(Box::new(e));
     }
     match std::fs::read_dir(&path) {
         Err(e) => Err(Box::new(e)),
         Ok(e) => Ok(e
-                .map(|e| e.ok())
-                .filter(Option::is_some)
-                .map(|e| unsafe { e.unwrap_unchecked() })
-                .collect())
+            .map(|e| e.ok())
+            .filter(Option::is_some)
+            .map(|e| unsafe { e.unwrap_unchecked() })
+            .collect()),
     }
 }
