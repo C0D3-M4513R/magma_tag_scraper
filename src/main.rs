@@ -2,8 +2,13 @@
 use std::fs::DirEntry;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use log::LevelFilter;
+use std::sync::mpsc::TryRecvError;
 use tokio::task::JoinSet;
+use std::thread::JoinHandle;
+use tokio::time::Instant;
+
 mod download;
 mod versions;
 
@@ -32,35 +37,72 @@ impl Version {
     }
 }
 pub(crate) type Error = Box<dyn std::error::Error + Send + Sync>;
-
+fn get_runtime()-> &'static tokio::runtime::Runtime {
+    static RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
+    RUNTIME.get_or_init(||{
+        tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .expect("Failed to create runtime")
+    })
+}
 fn main() -> Result<(), ()> {
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("Failed to build runtime")
-        .block_on(run())
+    get_runtime().block_on(run())
 }
 
+const LOG_LEVEL: LevelFilter = LevelFilter::Warn;
 async fn run() -> Result<(), ()> {
     simple_logger::SimpleLogger::new()
         .with_utc_timestamps()
-        .with_module_level("want", LevelFilter::Info)
-        .with_module_level("reqwest::connect", LevelFilter::Info)
-        .with_module_level("reqwest::blocking::wait", LevelFilter::Info)
-        .with_module_level("mio::poll", LevelFilter::Info)
-        .with_module_level("rustls", LevelFilter::Info)
-        .with_level(LevelFilter::Info)
+        .with_module_level("want", LOG_LEVEL)
+        .with_module_level("reqwest::connect", LOG_LEVEL)
+        .with_module_level("reqwest::blocking::wait", LOG_LEVEL)
+        .with_module_level("mio::poll", LOG_LEVEL)
+        .with_module_level("rustls", LOG_LEVEL)
+        .with_level(LOG_LEVEL)
         .init()
         .expect(
             "Failed to initialize logger. Setting the logger for the first time should not fail.",
         );
+    log::error!("Starting");
     let mut js = JoinSet::new();
     js.spawn(get_lib_list(Version::V1_12_2));
+    js.spawn(get_lib_list(Version::V1_16_5));
     js.spawn(get_lib_list(Version::V1_18_2));
     js.spawn(get_lib_list(Version::V1_19_3));
+    let (send_io, rec_io) = std::sync::mpsc::channel::<JoinHandle<Result<(),Error>>>();
+    let writer = std::thread::spawn(move||{
+        loop{
+            match rec_io.try_recv(){
+                Err(TryRecvError::Disconnected) =>{
+                    return;
+                }
+                Err(TryRecvError::Empty) => {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                Ok(e) => {
+                    match e.join() {
+                        Ok(Ok(_)) => log::info!("Finished writing"),
+                        Ok(Err(e)) => log::error!("Failed to write: {}", e),
+                        Err(e) => log::error!("Failed to join writer thread: {:#?}", e),
+                    }
+                }
 
+            }
+        }
+    });
     while let Some(future) = js.join_next().await {
-        if let Ok((version, res)) = future {
+        if let Ok((version, mut download_thread,  res)) = future {
+            while let Some(thread) = download_thread.join_next().await {
+                match thread {
+                    Ok(Ok(e)) => {
+                        log::info!("Finished downloading {}", version.to_string());
+                        send_io.send(e).expect("Failed to send");
+                    }
+                    Ok(Err(e)) => log::error!("Failed to download: {}", e),
+                    Err(e) => log::error!("Failed to join download thread: {}", e),
+                }
+            }
             match res {
                 Ok(_) => log::info!("Got libs for version {}", version.to_string()),
                 Err(e) => log::error!(
@@ -71,115 +113,130 @@ async fn run() -> Result<(), ()> {
             }
         }
     }
+    drop(send_io);
+    match writer.join(){
+        Ok(_) => {}
+        Err(e) => log::error!("Failed to join writer thread: {:#?}", e),
+    };
+    log::error!("Finished");
     return Ok(());
 }
 
-async fn get_lib_list(version: Version) -> (Version, Result<(), Error>) {
+async fn get_lib_list(version: Version) -> (Version,JoinSet<Result<JoinHandle<Result<(),Error>>,Error>>,Result<(), Error>) {
+    let mut download: JoinSet<Result<JoinHandle<Result<(),Error>>, Error>> = JoinSet::new();
     let resp;
     let req = reqwest::get(MAGMA_API_URL.to_string() + version.to_string()).await;
     match req {
-        Err(e) => return (version, Err(Box::new(e))),
+        Err(e) => return (version, download, Err(Box::new(e))),
         Ok(e) => resp = e,
     }
     let body;
     let body_r = resp.bytes().await;
     match body_r {
         Ok(e) => body = e,
-        Err(e) => return (version, Err(Box::new(e))),
+        Err(e) => return (version, download, Err(Box::new(e))),
     }
     log::info!(
         "Got body for version {}. Parsing JSON.",
         version.to_string()
     );
-    let versions = serde_json::from_slice::<Vec<versions::Version>>(&body);
+    return match tokio::task::spawn_blocking(move || {
+        let versions = serde_json::from_slice::<Vec<versions::Version>>(&body);
 
-    log::info!("Finished Parsing JSON.");
-    let version_name = version.to_string();
-    let mut folder_path = get_cwd().clone();
-    folder_path.push(version_name);
-    let folder_path = folder_path;
-    let folder_server_path = folder_path.join("server");
-    let folder_installer_path = folder_path.join("installer");
-    let folder_server: Vec<DirEntry> = match get_folder_content(&folder_server_path){
-        Ok(e) => e,
-        Err(e) => return (version, Err(e))
-    };
-    let folder_installer: Vec<DirEntry> = match get_folder_content(&folder_installer_path){
-        Ok(e) => e,
-        Err(e) => return (version, Err(e))
-    };
+        let mut js = JoinSet::new();
+        log::info!("Finished Parsing JSON.");
+        let version_name = version.to_string();
+        let mut folder_path = get_cwd().clone();
+        folder_path.push(version_name);
+        let folder_path = folder_path;
+        let folder_server_path = folder_path.join("server");
+        let folder_installer_path = folder_path.join("installer");
+        let folder_server: Vec<DirEntry> = match get_folder_content(&folder_server_path) {
+            Ok(e) => e,
+            Err(e) => return (version, download, js, Err(e))
+        };
+        let folder_installer: Vec<DirEntry> = match get_folder_content(&folder_installer_path) {
+            Ok(e) => e,
+            Err(e) => return (version, download, js, Err(e))
+        };
 
-    let mut js: JoinSet<Result<(), Error>> = JoinSet::new();
-    match versions {
-        Err(e) => return (version, Err(Box::new(e))),
-        Ok(mut versions) => {
-            let versions_new: Vec<versions::Version>;
-            let versions_old: Vec<versions::Version>;
-            {
-                versions.shrink_to_fit();
-                if versions.len() <= MAX_VERSIONS || MAX_VERSIONS == 0{
-                    versions_new = versions;
-                    versions_old = Vec::new();
-                } else {
-                    versions_old = versions.split_off(MAX_VERSIONS);
-                    versions_new = versions;
+        match versions {
+            Err(e) => return (version, download, js, Err(Box::new(e))),
+            Ok(mut versions) => {
+                let versions_new: Vec<versions::Version>;
+                let versions_old: Vec<versions::Version>;
+                {
+                    versions.shrink_to_fit();
+                    if versions.len() <= MAX_VERSIONS || MAX_VERSIONS == 0 {
+                        versions_new = versions;
+                        versions_old = Vec::new();
+                    } else {
+                        versions_old = versions.split_off(MAX_VERSIONS);
+                        versions_new = versions;
+                    }
                 }
-            }
-            //delete old versions in server folder
-            for i in &folder_server {
-                if let Some(file_name) = i.file_name().to_str() {
-                    if versions_old
-                        .iter()
-                        .filter(|e| get_name(e.get_link()) == file_name)
-                        .count()
-                        > 0
-                    {
-                        log::trace!("Deleting {}", file_name);
-                        js.spawn(remove_version(i.path()));
+                log::info!("Versions: {}", versions_new.len());
+                //delete old versions in server folder
+                for i in &folder_server {
+                    if let Some(file_name) = i.file_name().to_str() {
+                        if versions_old
+                            .iter()
+                            .filter(|e| get_name(e.get_link()) == file_name)
+                            .count()
+                            > 0
+                        {
+                            log::trace!("Deleting {}", file_name);
+                            js.spawn(remove_version(i.path()));
+                        }
+                    }
+                }
+                //delete old versions in installer folder
+                for i in &folder_installer {
+                    if let Some(file_name) = i.file_name().to_str() {
+                        if versions_old
+                            .iter()
+                            .filter(|e| get_name(e.get_installer_link()) == file_name)
+                            .count()
+                            > 0
+                        {
+                            log::trace!("Deleting {}", file_name);
+                            js.spawn(remove_version(i.path()));
+                        }
+                    }
+                }
+                for i in versions_new {
+                    log::trace!("Handling Version: {:#?}",i);
+                    let link = i.get_link();
+                    let installer_link = i.get_installer_link();
+                    download_link(&folder_server, &folder_server_path, link, &mut download);
+                    if link != installer_link {
+                        download_link(&folder_installer, &folder_installer_path, installer_link, &mut download);
                     }
                 }
             }
-            //delete old versions in installer folder
-            for i in &folder_installer {
-                if let Some(file_name) = i.file_name().to_str() {
-                    if versions_old
-                        .iter()
-                        .filter(|e| get_name(e.get_installer_link()) == file_name)
-                        .count()
-                        > 0
-                    {
-                        log::trace!("Deleting {}", file_name);
-                        js.spawn(remove_version(i.path()));
-                    }
+        }
+
+        (version, download, js, Ok(()))
+    }).await {
+        Ok((verison, download, mut js, ok)) => {
+            let pre_io = Instant::now();
+            while let Some(thred) = js.join_next().await {
+                match thred {
+                    Ok(_) => {}
+                    Err(e) => log::error!("Failed to join io thread: {}", e),
                 }
             }
-            log::info!("Versions: {}", versions_new.len());
-            for i in versions_new {
-                log::trace!("Handling Version: {:#?}",i);
-                let link = i.get_link();
-                let installer_link = i.get_installer_link();
-                download_link(&folder_server, &folder_server_path, link, &mut js);
-                if link != installer_link {
-                    download_link(&folder_installer, &folder_installer_path, installer_link, &mut js);
-                }
-            }
-        }
+            log::warn!("Old version IO for version {} took {}ms", verison.to_string(), pre_io.elapsed().as_millis());
+            (verison, download, ok)
+        },
+        Err(e) => (version, JoinSet::new(), Err(Box::new(e)))
     }
-    while let Some(future) = js.join_next().await {
-        if let Ok(res) = future {
-            match res {
-                Ok(_) => {}
-                Err(e) => log::error!("{}", e),
-            }
-        }
-    }
-    (version, Ok(()))
 }
 fn download_link(
     folder: &Vec<DirEntry>,
     folder_path: impl AsRef<Path>,
     link: &String,
-    js: &mut JoinSet<Result<(), Error>>,
+    js: &mut JoinSet<Result<JoinHandle<Result<(),Error>>, Error>>,
 ) {
     let file_name = get_name(link).to_string();
     let path = folder_path.as_ref().join(&file_name);
