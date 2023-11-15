@@ -212,9 +212,10 @@ async fn get_lib_list(
                     log::trace!("Handling Version: {:#?}", i);
                     let link = i.get_link();
                     let installer_link = i.get_installer_link();
-                    download_link(&folder_server, &folder_server_path, link, &mut download);
+                    download_link(i.clone(), &folder_server, &folder_server_path, link, &mut download);
                     if link != installer_link {
                         download_link(
+                            i.clone(),
                             &folder_installer,
                             &folder_installer_path,
                             installer_link,
@@ -248,6 +249,7 @@ async fn get_lib_list(
     };
 }
 fn download_link(
+    version: versions::Version,
     folder: &Vec<DirEntry>,
     folder_path: impl AsRef<Path>,
     link: &String,
@@ -255,12 +257,21 @@ fn download_link(
 ) {
     let file_name = get_name(link).to_string();
     let path = folder_path.as_ref().join(&file_name);
-    if folder_contains_file_name(folder, &file_name).is_none() {
-        log::info!("Downloading {} to {}", link, path.display());
-        js.spawn(download::fetch_url(link.clone(), path));
-    } else {
-        log::info!("{} already exists", path.display())
-    }
+    let file_present = folder_contains_file_name(folder, &file_name).is_some();
+    let link = link.clone();
+    js.spawn(async move {
+        let result = if !file_present {
+            log::info!("Downloading {} to {}", link, path.display());
+            download::fetch_url(link.clone(), path.clone()).await
+        } else {
+            log::info!("{} already exists", path.display());
+            Ok(std::thread::spawn(||{Ok(())}))
+        };
+        if let Err(error) = filetime::set_file_mtime(path,filetime::FileTime::from_system_time(version.get_created_at().into())) {
+            log::error!("Failed to set modification time: {}", error);
+        }
+        result
+    });
 }
 
 async fn remove_version(i: PathBuf) -> Result<(), Error> {

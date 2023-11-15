@@ -6,8 +6,8 @@ pub(crate) struct Version {
     name: String,
     #[allow(dead_code)]
     tag_name: String,
-    #[allow(dead_code)]
-    created_at: String,
+    #[serde(with = "time::serde::iso8601")]
+    created_at: time::OffsetDateTime,
     link: String,
     installer_link: String,
     #[allow(dead_code)]
@@ -21,7 +21,7 @@ impl Version {
     pub fn new(
         name: String,
         tag_name: String,
-        created_at: String,
+        created_at: time::OffsetDateTime,
         link: String,
         installer_link: String,
         git_commit_url: String,
@@ -45,9 +45,8 @@ impl Version {
     pub fn get_tag_name(&self) -> &String {
         &self.tag_name
     }
-    #[allow(dead_code)]
-    pub fn get_created_at(&self) -> &String {
-        &self.created_at
+    pub fn get_created_at(&self) -> time::OffsetDateTime {
+        self.created_at
     }
     pub fn get_link(&self) -> &String {
         &self.link
