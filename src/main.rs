@@ -260,17 +260,24 @@ fn download_link(
     let file_present = folder_contains_file_name(folder, &file_name).is_some();
     let link = link.clone();
     js.spawn(async move {
-        let result = if !file_present {
+        if !file_present {
             log::info!("Downloading {} to {}", link, path.display());
-            download::fetch_url(link.clone(), path.clone()).await
+            let result = download::fetch_url(link.clone(), path.clone()).await;
+            if let Ok(jh) = result {
+                match jh.join() {
+                    Ok(Ok(_)) => {}
+                    Ok(Err(err)) => {log::error!("Error whilst joining file writer thread: {}",err);}
+                    Err(err) => {log::error!("Error whilst preparing download: {:?}",err);}
+                }
+            }
         } else {
             log::info!("{} already exists", path.display());
-            Ok(std::thread::spawn(||{Ok(())}))
         };
+
         if let Err(error) = filetime::set_file_mtime(path,filetime::FileTime::from_system_time(version.get_created_at().into())) {
             log::error!("Failed to set modification time: {}", error);
         }
-        result
+        Ok(std::thread::spawn(||{Ok(())}))
     });
 }
 
