@@ -212,7 +212,13 @@ async fn get_lib_list(
                     log::trace!("Handling Version: {:#?}", i);
                     let link = i.get_link();
                     let installer_link = i.get_installer_link();
-                    download_link(i.clone(), &folder_server, &folder_server_path, link, &mut download);
+                    download_link(
+                        i.clone(),
+                        &folder_server,
+                        &folder_server_path,
+                        link,
+                        &mut download,
+                    );
                     if link != installer_link {
                         download_link(
                             i.clone(),
@@ -266,18 +272,25 @@ fn download_link(
             if let Ok(jh) = result {
                 match jh.join() {
                     Ok(Ok(_)) => {}
-                    Ok(Err(err)) => {log::error!("Error whilst joining file writer thread: {}",err);}
-                    Err(err) => {log::error!("Error whilst preparing download: {:?}",err);}
+                    Ok(Err(err)) => {
+                        log::error!("Error whilst joining file writer thread: {}", err);
+                    }
+                    Err(err) => {
+                        log::error!("Error whilst preparing download: {:?}", err);
+                    }
                 }
             }
         } else {
             log::info!("{} already exists", path.display());
         };
 
-        if let Err(error) = filetime::set_file_mtime(path,filetime::FileTime::from_system_time(version.get_created_at().into())) {
+        if let Err(error) = filetime::set_file_mtime(
+            path,
+            filetime::FileTime::from_system_time(version.get_created_at().into()),
+        ) {
             log::error!("Failed to set modification time: {}", error);
         }
-        Ok(std::thread::spawn(||{Ok(())}))
+        Ok(std::thread::spawn(|| Ok(())))
     });
 }
 
